@@ -79,14 +79,20 @@ namespace Routing.Api.Controllers
 
         [HttpGet("{companyId}",Name =nameof(GetCompany))]        //api/companies/{companyId}
         //[Route("{companyId}")]
-        public async Task<IActionResult> GetCompany(Guid companyId)
+        public async Task<IActionResult> GetCompany(Guid companyId,string fields)
         {
+            if (!_propertyCheckerService.TypeHasProperties<CompanyDto>(fields))
+            {
+                return BadRequest();
+            }
+
             var company = await _companyRepository.GetCompanyAsync(companyId);
+            
             if (company == null)
             {
                 return NotFound();
             }
-            return Ok(_mapper.Map<CompanyDto>(company));
+            return Ok(_mapper.Map<CompanyDto>(company).ShapeData(fields));
         }
 
         [HttpPost]
