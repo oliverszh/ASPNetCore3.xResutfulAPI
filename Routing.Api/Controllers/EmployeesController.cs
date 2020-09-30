@@ -31,7 +31,7 @@ namespace Routing.Api.Controllers
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
         }
 
-        [HttpGet]
+        [HttpGet(Name=nameof(GetEmployeesForCompany))]
         public async Task<ActionResult<IEnumerable<EmployeeDto>>> GetEmployeesForCompany(Guid companyId, [FromQuery] EmployeeDtoParameters parameters)
         {
             if (!await _companyRepository.CompanyExistsAsync(companyId))
@@ -59,7 +59,7 @@ namespace Routing.Api.Controllers
             return Ok(employeeDto);
         }
 
-        [HttpPost]
+        [HttpPost(Name =nameof(CreateEmployeeForCompany))]
         public async Task<ActionResult<EmployeeDto>> CreateEmployeeForCompany(Guid companyId,EmployeeAddDto employee)
         {
             if(! await _companyRepository.CompanyExistsAsync(companyId))
