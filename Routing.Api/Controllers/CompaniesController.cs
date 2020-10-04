@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
+using Microsoft.Net.Http.Headers;
 using Routing.Api.DtoParameters;
 using Routing.Api.Entities;
 using Routing.Api.Helpers;
@@ -52,19 +53,17 @@ namespace Routing.Api.Controllers
             }
 
             var companies = await _companyRepository.GetCompaniesAsync(parameters);
-            var companyDtos = _mapper.Map<IEnumerable<CompanyDto>>(companies);
+           
 
-            var previousPageLink = companies.HasPrevious ? CreateCompaniesResourceUri(parameters, ResourceUriType.PreviousPage) : null;
-            var nextPageLink = companies.HasNext ? CreateCompaniesResourceUri(parameters, ResourceUriType.NextPage) : null;
+            //var previousPageLink = companies.HasPrevious ? CreateCompaniesResourceUri(parameters, ResourceUriType.PreviousPage) : null;
+            //var nextPageLink = companies.HasNext ? CreateCompaniesResourceUri(parameters, ResourceUriType.NextPage) : null;
 
             var paginationMetadata = new
             {
                 totalCount = companies.TotalCount,
                 pageSize = companies.PageSize,
                 currentPage = companies.CurrentPage,
-                totalPages = companies.TotalPages,
-                previousPageLink,
-                nextPageLink
+                totalPages = companies.TotalPages
             };
 
             Response.Headers.Add("X-Pagination", JsonSerializer.Serialize(paginationMetadata,
@@ -75,13 +74,45 @@ namespace Routing.Api.Controllers
 
             //return Ok();
             //return companyDtos;
-            return Ok(companyDtos.ShapeData(parameters.Fields));
+            var companyDtos = _mapper.Map<IEnumerable<CompanyDto>>(companies);
+            var shapedData = companyDtos.ShapeData(parameters.Fields);
+
+            var links = CreateLinksForCompany(parameters,companies.HasPrevious,companies.HasNext);
+
+            //{value:[xxx],links}
+
+            var shapedCompaniesWithLinks = shapedData.Select(c =>
+            {
+                var companyDict = c as IDictionary<string, object>;
+                var companyLinks = CreateLinksForCompany((Guid)companyDict["Id"], null);
+                companyDict.Add("links", companyLinks);
+                return companyDict;
+            });
+
+            var linkedCollectionResource = new
+            {
+                value = shapedCompaniesWithLinks,
+                links
+            };
+
+            return Ok(linkedCollectionResource);
         }
 
+        [Produces("application/json",
+            "application/vnd.company.hateoas+json",
+            "application/vnd.company.company.friendly+json",
+            "application/vnd.company.company.friendly.hateoas+json",
+            "application/vnd.company.company.full+json",
+            "application/vnd.company.company.full.hateoas+json")]
         [HttpGet("{companyId}",Name =nameof(GetCompany))]        //api/companies/{companyId}
         //[Route("{companyId}")]
-        public async Task<IActionResult> GetCompany(Guid companyId,string fields)
+        public async Task<IActionResult> GetCompany(Guid companyId,string fields,[FromHeader(Name ="Accept")] string  mediaType)
         {
+            if(!MediaTypeHeaderValue.TryParse(mediaType,out MediaTypeHeaderValue parsedMediaType))
+            {
+                return BadRequest();
+            }
+
             if (!_propertyCheckerService.TypeHasProperties<CompanyDto>(fields))
             {
                 return BadRequest();
@@ -94,16 +125,53 @@ namespace Routing.Api.Controllers
                 return NotFound();
             }
 
-            var links = CreateLinksForCompany(companyId, fields);
+            var includeLinks = parsedMediaType.SubTypeWithoutSuffix.EndsWith("hateoas", StringComparison.InvariantCultureIgnoreCase);
 
-            var LinkedDict = _mapper.Map<CompanyDto>(company).ShapeData(fields) as IDictionary<string, object>;
+            IEnumerable<LinkDto> myLinks = new List<LinkDto>();
 
-            LinkedDict.Add("links", links);
+            if (includeLinks)
+            {
+                myLinks = CreateLinksForCompany(companyId, fields);
+            }
 
-            return Ok(LinkedDict);
+            var primaryMediaType = includeLinks ? parsedMediaType.SubTypeWithoutSuffix.Substring(0, parsedMediaType.SubTypeWithoutSuffix.Length - 8) : parsedMediaType.SubTypeWithoutSuffix;
+
+            if (primaryMediaType == "vnd.company.company.full")
+            {
+                var full= _mapper.Map<CompanyFullDto>(company).ShapeData(fields) as IDictionary<string, object>;
+
+                if (includeLinks)
+                {
+                    full.Add("links", myLinks);
+                }
+                return Ok(full);
+            }
+
+            var friendly = _mapper.Map<CompanyDto>(company).ShapeData(fields) as IDictionary<string, object>;
+
+            if (includeLinks)
+            {
+                friendly.Add("links", myLinks);
+            }
+
+            return Ok(friendly);
+
+            //if (parsedMediaType.MediaType == "application/vnd.company.hateoas+json")
+            //{
+            //    var links = CreateLinksForCompany(companyId, fields);
+
+            //    var LinkedDict = _mapper.Map<CompanyDto>(company).ShapeData(fields) as IDictionary<string, object>;
+
+            //    LinkedDict.Add("links", links);
+
+            //    return Ok(LinkedDict);
+            //}
+
+            //return Ok(_mapper.Map<CompanyDto>(company).ShapeData(fields));
+            
         }
 
-        [HttpPost]
+        [HttpPost(Name =nameof(CreateCompany))]
         public async Task<ActionResult<CompanyDto>> CreateCompany(CompanyAddDto company)
         {
             //在3.0之前需要这样写
@@ -213,6 +281,26 @@ namespace Routing.Api.Controllers
             links.Add(new LinkDto(Url.Link(nameof(EmployeesController.GetEmployeesForCompany),new { companyId}), "employees", "GET"));
 
             return links;
+        }
+
+
+        private IEnumerable<LinkDto> CreateLinksForCompany(CompanyDtoParameters parameters,bool hasPrevious,bool hasNext)
+        {
+            var linkList = new List<LinkDto>();
+
+            linkList.Add(new LinkDto(CreateCompaniesResourceUri(parameters, ResourceUriType.CurrentPage), "self", "GET"));
+
+            if (hasPrevious)
+            {
+                linkList.Add(new LinkDto(CreateCompaniesResourceUri(parameters, ResourceUriType.PreviousPage), "previous_page", "GET"));
+            }
+
+            if (hasNext)
+            {
+                linkList.Add(new LinkDto(CreateCompaniesResourceUri(parameters, ResourceUriType.NextPage), "next_page", "GET"));
+            }
+
+            return linkList;
         }
 
     }
