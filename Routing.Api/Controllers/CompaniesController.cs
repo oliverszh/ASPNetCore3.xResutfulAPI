@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 using Microsoft.Net.Http.Headers;
+using Routing.Api.ActionConstraints;
 using Routing.Api.DtoParameters;
 using Routing.Api.Entities;
 using Routing.Api.Helpers;
@@ -129,7 +130,7 @@ namespace Routing.Api.Controllers
 
             IEnumerable<LinkDto> myLinks = new List<LinkDto>();
 
-            if (includeLinks)
+            if (includeLinks)  
             {
                 myLinks = CreateLinksForCompany(companyId, fields);
             }
@@ -171,7 +172,40 @@ namespace Routing.Api.Controllers
             
         }
 
+        [HttpPost(Name = nameof(CreateCompanyWithBankruptTime))]
+        [RequestHeaderMatchesMediaType("Content-Type", "application/vnd.company.companyforcreationwithbankrupttime+json")]
+        [Consumes("application/vnd.company.companyforcreationwithbankrupttime+json")]
+        public async Task<ActionResult<CompanyDto>> CreateCompanyWithBankruptTime(CompanyAddWithBankruptTimeDto company)
+        {
+            //在3.0之前需要这样写
+            //现在不需要了,因为当Controller使用[ApiController]属性进行注解的时候,如果遇到验证错误
+            //那么就会自动返回400错误
+
+            //if (!ModelState.IsValid)
+            //{
+            //    return UnprocessableEntity(ModelState);
+            //}
+
+            var entity = _mapper.Map<Company>(company);
+            _companyRepository.AddCompany(entity);
+            await _companyRepository.SaveAsync();
+
+            var returnDto = _mapper.Map<CompanyDto>(entity);
+
+            var links = CreateLinksForCompany(returnDto.Id, null);
+
+            var linkedDict = returnDto.ShapeData(null) as IDictionary<string, object>;
+            linkedDict.Add("links", links);
+
+            return CreatedAtRoute(nameof(GetCompany), new { companyId = linkedDict["Id"] }, linkedDict);
+        }
+
+
+
         [HttpPost(Name =nameof(CreateCompany))]
+        [RequestHeaderMatchesMediaType("Content-Type","application/json",
+            "application/vnd.company.companyforcreation+json")]
+        [Consumes("application/json","application/vnd.company.companyforcreation+json")]
         public async Task<ActionResult<CompanyDto>> CreateCompany(CompanyAddDto company)
         {
             //在3.0之前需要这样写
